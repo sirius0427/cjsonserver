@@ -26,6 +26,25 @@ struct jrpc_server my_server;
 
 cJSON * data_insert(jrpc_context * ctx, cJSON * params, cJSON *id) 
 {
+	//int i,count;
+	//count = cJSON_GetArraySize(params);
+	//printf( "params count[%d]\n", count );
+	printf( "params[%d]\n", params->type);
+	cJSON *child,*content,*createTime,*cid,*talker;
+	child = params->child;
+	while( child != NULL )
+	{
+		content = cJSON_GetObjectItem( child , "content");
+		createTime = cJSON_GetObjectItem( child , "createTime");
+		cid = cJSON_GetObjectItem( child , "id");
+		talker = cJSON_GetObjectItem( child , "talker");
+
+		printf( "content[%s]\ncreateTime[%.0lf]\nid[%d]\ntalker[%s]\n", content->valuestring, createTime->valuedouble, cid->valueint, talker->valuestring );
+		printf( "--------------------\n" );
+		child = child->next;
+	}
+
+
 	return cJSON_CreateNumber(0);
 }
 
@@ -45,7 +64,7 @@ cJSON * error_cb(jrpc_context * ctx, cJSON * params, cJSON *id)
 	char* msg = (char*)malloc(256);
 	char* msgc = (char*)malloc(256);
 	strcpy(msg,"error message.");
-	strcpy(msg,"error message content.");
+	strcpy(msgc,"error message content.");
 	ctx->error_code = 1;
 	ctx->error_message = msg;
 	ctx->data = msgc;
