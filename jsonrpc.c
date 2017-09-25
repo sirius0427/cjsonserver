@@ -334,21 +334,20 @@ static int eval_request(struct jrpc_server *server, struct jrpc_connection * con
 	cJSON *method, *params, *id;
 	method = cJSON_GetObjectItem(root, "method");
 	if (method != NULL && method->type == cJSON_String) {
-		params = cJSON_GetObjectItem(root, "params");
-		if (params == NULL|| params->type == cJSON_Array
-		|| params->type == cJSON_Object) {
+		params = cJSON_GetObjectItem(root, "messages");
+		printf( "params->type[%d]\n", params->type );
+		if (params == NULL|| params->type == cJSON_Array || params->type == cJSON_Object) {
 			id = cJSON_GetObjectItem(root, "id");
-			if (id == NULL|| id->type == cJSON_String
-			|| id->type == cJSON_Number) {
+			if (id == NULL|| id->type == cJSON_String || id->type == cJSON_Number) {
 			//We have to copy ID because using it on the reply and deleting the response Object will also delete ID
 				cJSON * id_copy = NULL;
 				if (id != NULL)
-					id_copy =
-							(id->type == cJSON_String) ? cJSON_CreateString(
-									id->valuestring) :
-									cJSON_CreateNumber(id->valueint);
+					id_copy = (id->type == cJSON_String) ? cJSON_CreateString( id->valuestring) : cJSON_CreateNumber(id->valueint);
 				if (server->debug_level)
+				{
 					printf("Method Invoked: %s\n", method->valuestring);
+					printf("message Invoked: %s\n", params->string);
+				}
 				return invoke_procedure(server, conn, method->valuestring, params, id_copy, server->type);
 			}
 		}
@@ -363,7 +362,7 @@ static int eval_request_batch(struct jrpc_server *server, struct jrpc_connection
 	cJSON *object, **method, **params,**idcopy, *id;
 	int i,count;
 	count = cJSON_GetArraySize(root);
-	//printf("cJSON_GetArraySize=%d\n",count);
+	printf("cJSON_GetArraySize=%d\n",count);
 	method = (cJSON**)malloc(sizeof(cJSON*)*count);
 	params = (cJSON**)malloc(sizeof(cJSON*)*count);
 	idcopy = (cJSON**)malloc(sizeof(cJSON*)*count);
@@ -376,7 +375,7 @@ static int eval_request_batch(struct jrpc_server *server, struct jrpc_connection
 			method[i] = cJSON_GetObjectItem(object, "method");
 			if (method[i] != NULL && method[i]->type == cJSON_String) 
 			{
-				params[i] = cJSON_GetObjectItem(object, "params");
+				params[i] = cJSON_GetObjectItem(object, "messages");
 				if (params[i] == NULL || params[i]->type == cJSON_Array || params[i]->type == cJSON_Object) 
 				{
 					id = cJSON_GetObjectItem(object, "id");
@@ -479,7 +478,7 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 					eval_request(server, conn, root);
 				}
 				//added by wangzugang
-				//printf("root->type=%d\n",root->type);
+				printf("root->type=%d\n",root->type);
 				if (root->type == cJSON_Array) {
 					eval_request_batch(server, conn, root);
 				}
