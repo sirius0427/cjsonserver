@@ -31,7 +31,7 @@
 #define JRPC_INVALID_PARAMS -32602
 #define JRPC_INTERNAL_ERROR -32603
 
-#define JRPC_BUFFER_SIZE	(1024*64)
+#define JRPC_BUFFER_SIZE	(1024*800*1024)
 
 typedef enum __jrpc_type_t
 {
@@ -76,7 +76,7 @@ struct jrpc_connection {
 	struct ev_io io;
 	int fd;
 	int pos;
-	unsigned int buffer_size;
+	unsigned long buffer_size;
 	char * buffer;
 	int debug_level;
 };
