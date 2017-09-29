@@ -75,11 +75,16 @@ static int jrpc_http_parse(jrpc_parser_t* parser, char* text)
 		snprintf(parser->length,pend-pstart-16+1,pstart+16);
 		
 		//Content
-		len = atoi(parser->length);
+		pstart = strstr(text+5,"{");
+		//pend = strstr(pstart, "\"method\":\"datainsert\"}" );
+		//len = atoi(parser->length)-10;
+		//len = indexOf(text+5, "\"method\":\"datainsert\"}" ) - indexOf( text+5,"{") + 23;
+		len = indexOf(text+5, "\"}\r" ) - indexOf( text+5,"{") + 2;
+		
 		printf("Content-Length=%d\n",len);
 		parser->content = (char*)malloc(len+1);	
-		pstart = strstr(text+5,"\r\n\r\n");
-		snprintf(parser->content,len+1,pstart+4);
+		//pstart = strstr(text+5,"\r\n\r\n");
+		snprintf(parser->content,len+1,pstart);
 	}else
 	{
 		sprintf(parser->method,"UNKNOW");
@@ -418,7 +423,8 @@ static void close_connection(struct ev_loop *loop, ev_io *w) {
 	free(((struct jrpc_connection *) w));
 }
 
-static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
+static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) 
+{
 	struct jrpc_connection *conn;
 	struct jrpc_server *server = (struct jrpc_server *) w->data;
 	jrpc_parser_t parser;
@@ -427,6 +433,7 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 	//get our 'subclassed' event watcher
 	conn = (struct jrpc_connection *) w;
 	int fd = conn->fd;
+	//conn->buffer_size += 10;
 	if (conn->pos == (conn->buffer_size - 1)) {
 		char * new_buffer = realloc(conn->buffer, conn->buffer_size *= 2);
 		if (new_buffer == NULL) {
@@ -437,9 +444,9 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 		memset(conn->buffer + conn->pos, 0, conn->buffer_size - conn->pos);
 	}
 	// can not fill the entire buffer, string must be NULL terminated
-	int max_read_size = conn->buffer_size - conn->pos - 1;
-	if ((bytes_read = read(fd, conn->buffer + conn->pos, max_read_size))
-			== -1) {
+	int max_read_size = conn->buffer_size - conn->pos - 1 ;
+	printf( "max_read_size[%d][%d][%d]\n", max_read_size , conn->buffer_size, conn->pos );
+	if ((bytes_read = read(fd, conn->buffer + conn->pos, max_read_size)) == -1) {
 		perror("read");
 		return close_connection(loop, w);
 	}
@@ -452,7 +459,7 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 		cJSON *root;
 		char *end_ptr;
 		conn->pos += bytes_read;
-		
+
 		//解析http服务
 		if(server->type == JRPC_TYPE_HTTP)
 		{
@@ -462,11 +469,11 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 			}
 			printf( "--------------------------------------------------------------------------------------------------------------\n");
 			jrpc_http_parse(&parser,conn->buffer);
-			//printf("\r\n-----------------------------\r\n%s\r\n----------------------------------,http_length=%d\r\n",conn->buffer,http_length);
+			printf("\r\n-----------------------------\r\n%s\r\n----------------------------------,http_length=%ld\r\n",conn->buffer,http_length);
 			memmove(conn->buffer, &conn->buffer[http_length], strlen(&conn->buffer[http_length])+1);
 			conn->pos = strlen(&conn->buffer[http_length]);
 			memset(conn->buffer + conn->pos, 0, conn->buffer_size - conn->pos - 1);
-			printf("\r\n---------------json-content--------------\r\n%s\r\n----------------------------------\r\n",parser.content);
+			//printf("\r\n---------------json-content--------------\r\n%s\r\n----------------------------------\r\n",parser.content);
 			if ((root = cJSON_Parse_Stream(parser.content, &end_ptr)) != NULL) {
 				if (server->debug_level > 1) {
 					char * str_result = jrpc_json_print(root);
@@ -500,7 +507,8 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 		}
 		else
 		{
-			if ((root = cJSON_Parse_Stream(conn->buffer, &end_ptr)) != NULL) {
+			if ((root = cJSON_Parse_Stream(conn->buffer, &end_ptr)) != NULL) 
+			{
 				if (server->debug_level > 1) {
 					char * str_result = jrpc_json_print(root);
 					printf("Valid JSON Received<---:\n%s\n", str_result);
@@ -537,7 +545,6 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents) {
 				}
 			}
 		}
-		
 	}
 
 }
@@ -549,19 +556,16 @@ static void accept_cb(struct ev_loop *loop, ev_io *w, int revents) {
 	struct sockaddr_storage their_addr; // connector's address information
 	socklen_t sin_size;
 	sin_size = sizeof their_addr;
-	connection_watcher->fd = accept(w->fd, (struct sockaddr *) &their_addr,
-			&sin_size);
+	connection_watcher->fd = accept(w->fd, (struct sockaddr *) &their_addr, &sin_size);
 	if (connection_watcher->fd == -1) {
 		perror("accept");
 		free(connection_watcher);
 	} else {
 		if (((struct jrpc_server *) w->data)->debug_level) {
-			inet_ntop(their_addr.ss_family,
-					get_in_addr((struct sockaddr *) &their_addr), s, sizeof s);
+			inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *) &their_addr), s, sizeof s);
 			printf("server: got connection from %s\n", s);
 		}
-		ev_io_init(&connection_watcher->io, connection_cb,
-				connection_watcher->fd, EV_READ);
+		ev_io_init(&connection_watcher->io, connection_cb, connection_watcher->fd, EV_READ);
 		//copy pointer to struct jrpc_server
 		connection_watcher->io.data = w->data;
 		connection_watcher->buffer_size = JRPC_BUFFER_SIZE;
@@ -569,19 +573,18 @@ static void accept_cb(struct ev_loop *loop, ev_io *w, int revents) {
 		memset(connection_watcher->buffer, 0, JRPC_BUFFER_SIZE);
 		connection_watcher->pos = 0;
 		//copy debug_level, struct jrpc_connection has no pointer to struct jrpc_server
-		connection_watcher->debug_level =
-				((struct jrpc_server *) w->data)->debug_level;
+		connection_watcher->debug_level = ((struct jrpc_server *) w->data)->debug_level;
 		ev_io_start(loop, &connection_watcher->io);
 	}
 }
 
 int jrpc_server_init(struct jrpc_server *server, int port_number) {
-    loop = EV_DEFAULT;
-    return jrpc_server_init_with_ev_loop(server, port_number, loop);
+	loop = EV_DEFAULT;
+	return jrpc_server_init_with_ev_loop(server, port_number, loop);
 }
 
 int jrpc_server_init_with_ev_loop(struct jrpc_server *server, 
-        int port_number, struct ev_loop *loop) {
+		int port_number, struct ev_loop *loop) {
 	memset(server, 0, sizeof(struct jrpc_server));
 	server->loop = loop;
 	server->port_number = port_number;
@@ -614,7 +617,7 @@ static int __jrpc_server_start(struct jrpc_server *server) {
 		return 1;
 	}
 
-// loop through all the results and bind to the first we can
+	// loop through all the results and bind to the first we can
 	for (p = servinfo; p != NULL; p = p->ai_next) {
 		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol))
 				== -1) {
@@ -668,12 +671,12 @@ static int __jrpc_server_start(struct jrpc_server *server) {
 // Make the code work with both the old (ev_loop/ev_unloop)
 // and new (ev_run/ev_break) versions of libev.
 #ifdef EVUNLOOP_ALL
-  #define EV_RUN ev_loop
-  #define EV_BREAK ev_unloop
-  #define EVBREAK_ALL EVUNLOOP_ALL
+#define EV_RUN ev_loop
+#define EV_BREAK ev_unloop
+#define EVBREAK_ALL EVUNLOOP_ALL
 #else
-  #define EV_RUN ev_run
-  #define EV_BREAK ev_break
+#define EV_RUN ev_run
+#define EV_BREAK ev_break
 #endif
 
 void jrpc_server_run(struct jrpc_server *server){
