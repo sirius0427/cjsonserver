@@ -51,7 +51,7 @@ char charAt(char *src,int index)
 	return p[i];  
 }  
 /*返回str2第一次出现在str1中的位置(下表索引),不存在返回-1*/  
-int indexOf(char *str1,char *str2)  
+long indexOf(char *str1,char *str2)  
 {  
 	char *p=str1;  
 	int i=0;  

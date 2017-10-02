@@ -17,6 +17,7 @@
 #include <arpa/inet.h>
 
 #include "jsonrpc.h"
+#include "LOGS.h"
 
 struct ev_loop *loop;
 
@@ -37,9 +38,10 @@ static char* jrpc_build_httpResponse(char* response)
 	return tosend;
 }
 
-static int jrpc_http_parse(jrpc_parser_t* parser, char* text)
+static int jrpc_http_parse(jrpc_parser_t* parser, char* text, int http_length)
 {
 	int len;
+	long lenstart,lenend;
 	char* pstart,*pend;
 	if(!strncmp(text,"GET",3))
 	{
@@ -53,6 +55,7 @@ static int jrpc_http_parse(jrpc_parser_t* parser, char* text)
 		return 0;
 	}else if(!strncmp(text,"POST",4))
 	{
+		DEBUGLOGSG( "jrpc_http_parse POST" );
 		//method
 		sprintf(parser->method,"POST");
 		
@@ -77,29 +80,74 @@ static int jrpc_http_parse(jrpc_parser_t* parser, char* text)
 		//Content
 		pstart = strstr(text+5,"{");
 		//pend = strstr(pstart, "\"method\":\"datainsert\"}" );
-		//len = atoi(parser->length)-10;
+		//len = atoi(parser->length)+10;
+		//len = strlen( text ) - indexOf( text+5,"{");
 		//len = indexOf(text+5, "\"method\":\"datainsert\"}" ) - indexOf( text+5,"{") + 23;
-		len = indexOf(text+5, "\"}\r" ) - indexOf( text+5,"{") + 2;
+		lenend = indexOf(text+5, "}\r" );
+		lenstart = indexOf( text+5,"{");
+		DEBUGLOGSG( "lenend[%ld]lenstart[%ld]", lenend, lenstart );
+		if( lenend >= http_length || lenend == -1)
+		{
+			ERRORLOGSG( "找不到结束符，退出[%ld][%d]",indexOf(text+5, "}\r" ), http_length );
+			printf( "--------text begin-------\n%s\n---------text end----------\n",text );
+			return -1;
+		}
+		if( lenstart >= http_length || lenstart == -1)
+		{
+			ERRORLOGSG( "找不到开始符，退出[%ld][%d]",indexOf(text+5, "{" ), http_length );
+			printf( "--------text begin-------\n%s\n---------text end----------\n",text );
+			return -1;
+		}
 		
-		printf("Content-Length=%d\n",len);
+		len = lenend - lenstart + 2;
+		if( len <= 0 )
+		{
+			ERRORLOGSG( "取得的长度错误，退出[%d]", len );
+			printf( "--------text begin-------\n%s\n---------text end----------\n",text );
+			return -1;
+		}
+
+		//printf("Content-Length=[%ld][%d][%d]\n", len, indexOf(text+5, "\"method\":\"datainsert\"}" )+23 , indexOf( text+5,"{") );
+		DEBUGLOGSG("Content-Length=[%ld][%ld][%ld]", len, indexOf(text+5, "}\r" ) , indexOf( text+5,"{") );
+		//printf("%s\n", text );
 		parser->content = (char*)malloc(len+1);	
+		DEBUGLOGSG( "malloc ok" );
 		//pstart = strstr(text+5,"\r\n\r\n");
 		snprintf(parser->content,len+1,pstart);
+
+		while(1)
+		{
+			pstart = strstr( parser->content, "\r\n" );
+			if( pstart == NULL )
+			{
+				break;
+			}
+			pend = strstr( pstart+2, "\r\n" );
+			if( pend == NULL )
+			{
+				break;
+			}
+			snprintf(pstart, strlen(parser->content)-(pend-pstart)-2, pend+2 ); 
+		}
+
+
+		printf( "%s\n", parser->content );
 	}else
 	{
 		sprintf(parser->method,"UNKNOW");
 	}
-	
+
 	return 0;
 }
 
 static int jrpc_http_check_intact(char* text)
 {
-	int len;
+	long len;
 	char* pstart,*pend;
 	char length[16]={0};
 	if(!strncmp(text,"GET",3))
 	{
+		DEBUGLOGSG( "http方法为GET" );
 		pend = strstr(text+4,"\r\n\r\n");
 		if(!pend)
 		{
@@ -108,31 +156,41 @@ static int jrpc_http_check_intact(char* text)
 		return pend+4-text;
 	}else if(!strncmp(text,"POST",4))
 	{
+		DEBUGLOGSG( "http方法为POST" );
 		pstart = strstr(text+5,"Content-Length:");
 		if(!pstart)
 		{
+			ERRORLOGSG( "取不到Content-Length长度" );
 			return -1;
 		}
 		pend = strstr(pstart,"\r\n");
 		if(!pend)
 		{
+			ERRORLOGSG( "取不到结束符" );
 			return -1;
 		}
 		snprintf(length,pend-pstart-16+1,pstart+16);
-		len = atoi(length);
+		len = atol(length);
+		DEBUGLOGSG( "Content-Length:%ld", len );
+		return len;
+		//printf( "text=%s\n", text );
 		
-		pstart = strstr(text+5,"\r\n\r\n");
+		/*pstart = strstr(text+5,"\r\n\r\n");
+		DEBUGLOGSG( "pstart位置为[%d]", strlen(pstart));
 		if(strlen(pstart+4) < len)
 		{
+			ERRORLOGSG( "取pstart错[%d][%d]",strlen(pstart+4), len );
 			return -1;
 		}else
 		{
-			//printf("\r\nContent-Length:%d\r\n",len);
-			//printf("\r\npstart-text=%d\r\n",pstart-text);
+			printf("\r\nContent-Length:%d\r\n",len);
+			printf("\r\npstart-text=%d\r\n",pstart-text);
 			return pstart+4+len-text;
 		}
+		*/
 	}else
 	{
+		DEBUGLOGSG( "http方法为空" );
 		return -1;
 	}
 }
@@ -337,15 +395,14 @@ static int invoke_procedure_batch(struct jrpc_server *server, struct jrpc_connec
 static int eval_request(struct jrpc_server *server, struct jrpc_connection * conn, cJSON *root) 
 {
 	cJSON *method, *params, *id;
+	//We have to copy ID because using it on the reply and deleting the response Object will also delete ID
+	cJSON * id_copy = NULL;
 	method = cJSON_GetObjectItem(root, "method");
-	if (method != NULL && method->type == cJSON_String) {
-		params = cJSON_GetObjectItem(root, "messages");
-		printf( "params->type[%d]\n", params->type );
+	if (method != NULL && method->type == cJSON_String && !strcmp( method->valuestring, "datainsert" )) {
+		params = cJSON_GetObjectItem(root, "params");
 		if (params == NULL|| params->type == cJSON_Array || params->type == cJSON_Object) {
 			id = cJSON_GetObjectItem(root, "id");
 			if (id == NULL|| id->type == cJSON_String || id->type == cJSON_Number) {
-			//We have to copy ID because using it on the reply and deleting the response Object will also delete ID
-				cJSON * id_copy = NULL;
 				if (id != NULL)
 					id_copy = (id->type == cJSON_String) ? cJSON_CreateString( id->valuestring) : cJSON_CreateNumber(id->valueint);
 				if (server->debug_level)
@@ -355,6 +412,12 @@ static int eval_request(struct jrpc_server *server, struct jrpc_connection * con
 				}
 				return invoke_procedure(server, conn, method->valuestring, params, id_copy, server->type);
 			}
+		}
+	}
+	else if (method != NULL && method->type == cJSON_String && !strcmp( method->valuestring, "contactinsert" )) {
+		params = cJSON_GetObjectItem(root, "params");
+		if (params == NULL|| params->type == cJSON_Array || params->type == cJSON_Object) {
+				return invoke_procedure(server, conn, method->valuestring, params, id_copy, server->type);
 		}
 	}
 	send_error(conn, JRPC_INVALID_REQUEST, strdup("The JSON sent is not a valid Request object."), NULL, server->type);
@@ -430,6 +493,8 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
 	jrpc_parser_t parser;
 	size_t bytes_read = 0;
 	size_t http_length = 0;
+	char *pstart, *pend;
+	char length[16]={0};
 	//get our 'subclassed' event watcher
 	conn = (struct jrpc_connection *) w;
 	int fd = conn->fd;
@@ -445,11 +510,48 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
 	}
 	// can not fill the entire buffer, string must be NULL terminated
 	int max_read_size = conn->buffer_size - conn->pos - 1 ;
-	printf( "max_read_size[%d][%d][%d]\n", max_read_size , conn->buffer_size, conn->pos );
-	if ((bytes_read = read(fd, conn->buffer + conn->pos, max_read_size)) == -1) {
+	DEBUGLOGSG( "max_read_size[%d][%ld][%d]", max_read_size , conn->buffer_size, conn->pos );
+	if ((bytes_read = read(fd, conn->buffer + conn->pos, 65535)) == -1) {
 		perror("read");
 		return close_connection(loop, w);
 	}
+	if (!bytes_read) {
+		// client closed the sending half of the connection
+		if (server->debug_level)
+			printf("Client closed connection.\n");
+		return close_connection(loop, w);
+	} 
+	pstart = strstr(conn->buffer+5,"Content-Length:");
+	if(!pstart)
+	{
+		ERRORLOGSG( "取不到Content-Length长度" );
+		return close_connection(loop, w);
+	}
+	pend = strstr(pstart,"\r\n");
+	if(!pend)
+	{
+		ERRORLOGSG( "取不到结束符" );
+		return close_connection(loop, w);
+	}
+	snprintf(length,pend-pstart-16+1,pstart+16);
+	http_length = atol(length);
+	DEBUGLOGSG( "http_length = [%ld]", http_length );
+
+	conn->pos = strlen( conn->buffer );
+	if( conn->pos <= http_length )
+	{
+		while((bytes_read = read(fd, conn->buffer + conn->pos, 65535 )) )
+		{
+			//DEBUGLOGSG( "conn->pos[%d]", conn->pos );
+			conn->pos = strlen( conn->buffer );
+			if( conn->pos >= http_length )
+				break;
+		}
+		DEBUGLOGSG( "接收完成conn->pos[%d]", conn->pos );
+	}
+	//printf( "connbuffer=%s\n", conn->buffer );
+	//printf( "connbuffer print end\n" );
+
 	if (!bytes_read) {
 		// client closed the sending half of the connection
 		if (server->debug_level)
@@ -467,12 +569,18 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
 			{
 				return;
 			}
-			printf( "--------------------------------------------------------------------------------------------------------------\n");
-			jrpc_http_parse(&parser,conn->buffer);
-			printf("\r\n-----------------------------\r\n%s\r\n----------------------------------,http_length=%ld\r\n",conn->buffer,http_length);
+			printf( "-------------------------------------------http_length[%ld]-----------------------------------------------------------\n", http_length);
+			if(jrpc_http_parse(&parser,conn->buffer,conn->pos) < 0 )
+			{
+				return close_connection(loop, w);
+			}
+			DEBUGLOGSG( "jrpc_http_parse ok" );
+			//printf("\r\n-----------------------------\r\n%s\r\n----------------------------------,http_length=%ld\r\n",conn->buffer,http_length);
 			memmove(conn->buffer, &conn->buffer[http_length], strlen(&conn->buffer[http_length])+1);
+			DEBUGLOGSG( "memmove ok" );
 			conn->pos = strlen(&conn->buffer[http_length]);
 			memset(conn->buffer + conn->pos, 0, conn->buffer_size - conn->pos - 1);
+			replace( conn->buffer, "\r\n", "" );
 			//printf("\r\n---------------json-content--------------\r\n%s\r\n----------------------------------\r\n",parser.content);
 			if ((root = cJSON_Parse_Stream(parser.content, &end_ptr)) != NULL) {
 				if (server->debug_level > 1) {
@@ -480,15 +588,19 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
 					printf("Valid JSON Received<---:\n%s\n", str_result);
 					free(str_result);
 				}
+				DEBUGLOGSG( "printf str_result" );
 
 				if (root->type == cJSON_Object) {
+					DEBUGLOGSG( "root is cJSON_Object, begin eval_request" );
 					eval_request(server, conn, root);
 				}
 				//added by wangzugang
-				printf("root->type=%d\n",root->type);
+				DEBUGLOGSG("root->type=%d",root->type);
 				if (root->type == cJSON_Array) {
+					DEBUGLOGSG( "root is cJSON_Array, begin eval_request_batch" );
 					eval_request_batch(server, conn, root);
 				}
+				DEBUGLOGSG("eval_request done" );
 				free(parser.content);
 				parser.content = NULL;
 
@@ -498,9 +610,9 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
 				{
 					if (server->debug_level) 
 					{
-						printf("INVALID JSON Received<---:\n---\n%s\n---\n", parser.content);
+						//printf("INVALID JSON Received<---:\n---\n%s\n---\n", parser.content);
 					}
-					send_error(conn, JRPC_PARSE_ERROR, strdup("Parse error. Invalid JSON was received by the server."), NULL, server->type);
+					send_error(conn, JRPC_PARSE_ERROR, strdup("Http Parse error. Invalid JSON was received by the server."), NULL, server->type);
 					return close_connection(loop, w);
 				}
 			}
@@ -540,7 +652,7 @@ static void connection_cb(struct ev_loop *loop, ev_io *w, int revents)
 					{
 						printf("INVALID JSON Received<---:\n---\n%s\n---\n", conn->buffer);
 					}
-					send_error(conn, JRPC_PARSE_ERROR, strdup("Parse error. Invalid JSON was received by the server."), NULL, server->type);
+					send_error(conn, JRPC_PARSE_ERROR, strdup("No Http Parse error. Invalid JSON was received by the server."), NULL, server->type);
 					return close_connection(loop, w);
 				}
 			}
@@ -565,6 +677,7 @@ static void accept_cb(struct ev_loop *loop, ev_io *w, int revents) {
 			inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *) &their_addr), s, sizeof s);
 			printf("server: got connection from %s\n", s);
 		}
+		DEBUGLOGSG( "开始接收数据" );
 		ev_io_init(&connection_watcher->io, connection_cb, connection_watcher->fd, EV_READ);
 		//copy pointer to struct jrpc_server
 		connection_watcher->io.data = w->data;

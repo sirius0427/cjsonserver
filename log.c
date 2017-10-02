@@ -4,7 +4,7 @@
 #include "LOGS.h"
 #include <dlfcn.h>
 
-#define LOG_STYLES_DOG        ( LOG_STYLE_DATETIMEMS | LOG_STYLE_LOGLEVEL | LOG_STYLE_PID | LOG_STYLE_TID | LOG_STYLE_SOURCE | LOG_STYLE_FORMAT | LOG_STYLE_NEWLINE )
+#define LOG_STYLES_DOG        ( LOG_STYLE_DATETIMEMS | LOG_STYLE_LOGLEVEL | LOG_STYLE_PID | LOG_STYLE_SOURCE | LOG_STYLE_FORMAT | LOG_STYLE_NEWLINE )
 #define LOG_STYLES_EVENT      ( LOG_STYLE_DATETIMEMS | LOG_STYLE_CUSTLABEL1 | LOG_STYLE_FORMAT | LOG_STYLE_NEWLINE )
 
 
@@ -39,7 +39,7 @@ int BEGINLOG()
 		//printf( "创建日志句柄成功\n" );
 	}       
 	/* 设置日志输出文件名 */
-	SetLogOutput( g , LOG_OUTPUT_FILE , "getnews.log" , LOG_NO_OUTPUTFUNC );
+	SetLogOutput( g , LOG_OUTPUT_FILE , "server.log" , LOG_NO_OUTPUTFUNC );
 	/* 设置当前日志过滤等级 */
 	SetLogLevel( g , LOG_LEVEL_DEBUG );
 	/* 设置当前行日志风格方案 */
