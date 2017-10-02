@@ -675,7 +675,7 @@ static void accept_cb(struct ev_loop *loop, ev_io *w, int revents) {
 	} else {
 		if (((struct jrpc_server *) w->data)->debug_level) {
 			inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *) &their_addr), s, sizeof s);
-			printf("server: got connection from %s\n", s);
+			DEBUGLOGSG("server: got connection from %s", s);
 		}
 		DEBUGLOGSG( "开始接收数据" );
 		ev_io_init(&connection_watcher->io, connection_cb, connection_watcher->fd, EV_READ);
